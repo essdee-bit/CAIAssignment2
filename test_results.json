@@ -1,0 +1,26 @@
+[
+    {
+        "query": "What was the net income of Company X in 2023?",
+        "expected": "high-confidence",
+        "actual": "high-confidence",
+        "confidence": 0.85,
+        "response": "Net income was $5M.",
+        "guardrail_triggered": false
+    },
+    {
+        "query": "What is the expected revenue growth for Company X next year?",
+        "expected": "low-confidence",
+        "actual": "low-confidence",
+        "confidence": 0.4,
+        "response": "\u26a0\ufe0f The model is unsure. Please verify with official financial reports.",
+        "guardrail_triggered": true
+    },
+    {
+        "query": "What is the capital of France?",
+        "expected": "irrelevant",
+        "actual": "low-confidence",
+        "confidence": 0.2,
+        "response": "\u26a0\ufe0f This question is not relevant to financial data.",
+        "guardrail_triggered": false
+    }
+]
