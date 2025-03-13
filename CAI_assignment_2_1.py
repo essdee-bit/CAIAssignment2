@@ -7,12 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/1VrHSV1VJxlNKliZdbCOZcGNqDKauxrNU
 """
 
-!pip install pdfplumber faiss-cpu rank-bm25 sentence-transformers
-
-"""FIRST VERSION : RESULTS seems fine but code is not as per the assignment . BASIC RAG includes FAISS and BM25both .
-Can be considered.
-"""
-
 import os
 import pdfplumber
 import faiss
@@ -110,9 +104,9 @@ def get_rag_response(query):
     """Retrieve and re-rank results for a given query."""
     hybrid_results = retrieve_relevant_passage(query)
     ranked_results = rerank_results(query, hybrid_results)
-
+    
     if not ranked_results or max(score for _, score in ranked_results) < 50:
         return "No highly relevant information found.", 0.0
-
+    
     best_response, confidence = ranked_results[0]
     return best_response, confidence / 100  # Normalize confidence to 0-1 scale
