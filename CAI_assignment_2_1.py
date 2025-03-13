@@ -1,4 +1,5 @@
 import streamlit as st
+from cai_assignment import get_rag_response  # Import the function from backend script
 
 def main():
     st.set_page_config(page_title="Financial RAG Chatbot", layout="wide")
@@ -11,7 +12,7 @@ def main():
     user_query = st.text_input("Ask a financial question:", "")
     
     if st.button("Get Answer") and user_query:
-        # Retrieve response and confidence score
+        # Retrieve response and confidence score from the backend
         response, confidence = get_rag_response(user_query)
         
         # Output-side guardrail: Handle low-confidence responses
@@ -46,11 +47,7 @@ def main():
             st.text(f"Confidence: {conf:.2f}")
             st.markdown("---")
 
-def get_rag_response(query):
-    # Placeholder function for RAG retrieval and response generation
-    # Replace this with actual implementation
-    return "Sample financial answer", 0.85
-
 if __name__ == "__main__":
     main()
+
 
