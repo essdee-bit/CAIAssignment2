@@ -13,7 +13,7 @@ import threading
 # File paths to financial documents
 pdf_files = ["aapl-20220924.pdf", "aapl-20230930.pdf"]
 
-@st.experimental_singleton
+@st.singleton
 def load_resources():
     """Load models and prepare embeddings and FAISS index."""
     embedding_model = SentenceTransformer("all-mpnet-base-v2")
