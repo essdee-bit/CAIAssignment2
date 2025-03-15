@@ -8,111 +8,118 @@ import torch.nn.functional as F
 import streamlit as st
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
-
+ 
 # File paths to financial documents
 pdf_files = ["aapl-20220924.pdf", "aapl-20230930.pdf"]
-
-# Load pre-trained SentenceTransformer for embeddings and response generation
-embedding_model = SentenceTransformer("all-mpnet-base-v2")  # Embedding model
-cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")  # Re-ranking model
-
+ 
+# Load pre-trained models
+embedding_model = SentenceTransformer("all-mpnet-base-v2")
+cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+ 
 def extract_text_from_pdfs(pdf_files):
     """Extract and clean text from multiple PDF files."""
     text_data = ""
     for file in pdf_files:
+        if not os.path.exists(file):
+            print(f"Warning: {file} not found. Skipping.")
+            continue
         with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
                 raw_text = page.extract_text()
                 if raw_text:
-                    cleaned_text = clean_text(raw_text)  # Clean extracted text
-                    text_data += cleaned_text + " "  # Append cleaned text
+                    cleaned_text = clean_text(raw_text)
+                    text_data += cleaned_text + " "
     return text_data
-
+ 
 def clean_text(text):
-    """Clean extracted text by removing special characters, extra spaces, and non-informative sections."""
-    text = re.sub(r'\s+', ' ', text)  # Normalize spaces
-    text = re.sub(r'[^a-zA-Z0-9.,;:\n ]', '', text)  # Remove special characters
-    text = re.sub(r'\b(UNITED STATES|SECURITIES AND EXCHANGE COMMISSION|FORM 10-K)\b', '', text, flags=re.IGNORECASE)  # Remove headers
-    text = text.strip()  # Remove extra spaces
+    """Clean extracted text by removing special characters and extra spaces."""
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[^a-zA-Z0-9.,;:\n ]', '', text)
+    text = text.strip()
     return text
-
+ 
 # Extract text from PDFs
 document_text = extract_text_from_pdfs(pdf_files)
-
+ 
 def chunk_text(text, chunk_size=512):
-    """Chunk text into smaller segments for processing."""
+    """Chunk text into smaller segments."""
     words = text.split()
     return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
-
+ 
 # Split text into chunks
 text_chunks = chunk_text(document_text)
-
+ 
 # Initialize BM25 for keyword-based retrieval
 bm25 = BM25Okapi([chunk.split() for chunk in text_chunks])
-
+ 
 # Generate embeddings for text chunks
 embeddings = np.array([embedding_model.encode(chunk) for chunk in text_chunks], dtype=np.float32)
-
-# Initialize FAISS index for fast similarity search
-d = embeddings.shape[1]  # Dimension of embeddings
-index = faiss.IndexFlatL2(d)  # L2 index for similarity search
-index.add(embeddings)  # Add embeddings to FAISS index
-
+ 
+# Initialize FAISS index
+d = embeddings.shape[1]
+index = faiss.IndexFlatL2(d)
+index.add(embeddings)
+ 
 def retrieve_relevant_passage(query, top_k=5):
     """Retrieve the most relevant passage using FAISS and BM25."""
     query_embedding = embedding_model.encode(query).astype(np.float32)
     distances, idx = index.search(query_embedding.reshape(1, -1), top_k)
-
-    # Convert L2 distance to similarity score (cosine similarity approximation)
-    similarity_scores = [1 / (1 + d) * 100 for d in distances[0]]  # Convert to percentage
+    similarity_scores = [1 / (1 + d) * 100 for d in distances[0]]
     faiss_results = [(text_chunks[i], similarity_scores[j]) for j, i in enumerate(idx[0])]
-
-    # BM25 retrieval
     bm25_scores = bm25.get_scores(query.split())
     bm25_results = sorted(zip(text_chunks, bm25_scores), key=lambda x: x[1], reverse=True)[:top_k]
-
-    # Merge FAISS and BM25 results using a hybrid score
     hybrid_results = {}
     for passage, score in faiss_results:
-        hybrid_results[passage] = score * 0.6  # FAISS weight
+        hybrid_results[passage] = score * 0.6
     for passage, score in bm25_results:
-        if passage in hybrid_results:
-            hybrid_results[passage] += score * 0.4  # BM25 weight
-        else:
-            hybrid_results[passage] = score * 0.4
-
-    sorted_results = sorted(hybrid_results.items(), key=lambda x: x[1], reverse=True)[:top_k]
-    return sorted_results
-
+        hybrid_results[passage] = hybrid_results.get(passage, 0) + score * 0.4
+    return sorted(hybrid_results.items(), key=lambda x: x[1], reverse=True)[:top_k]
+ 
 def rerank_results(query, results, top_k=3):
-    """Re-rank results using Cross-Encoder and return the top-k results."""
+    """Re-rank results using Cross-Encoder."""
     pairs = [(query, passage) for passage, _ in results]
     scores = cross_encoder.predict(pairs)
     scores = F.softmax(torch.tensor(scores), dim=0).numpy() * 100
-    ranked_results = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)[:top_k]
-    return [(res[0], res[1]) for res in ranked_results]
-
+    return sorted(zip(results, scores), key=lambda x: x[1], reverse=True)[:top_k]
+ 
+def filter_hallucinations(response, confidence):
+    """Filter responses with low confidence."""
+    if confidence < 40:
+        return "The system is unsure about the answer. Please check the financial reports directly."
+    return response
+ 
 def get_rag_response(query):
-    """Retrieve and re-rank results for a given query."""
+    """Retrieve and re-rank results."""
     hybrid_results = retrieve_relevant_passage(query)
     ranked_results = rerank_results(query, hybrid_results)
-    
     if not ranked_results or max(score for _, score in ranked_results) < 50:
         return "No highly relevant information found.", 0.0
-    
     best_response, confidence = ranked_results[0]
-    return best_response, confidence / 100  # Normalize confidence to 0-1 scale
-
+    return filter_hallucinations(best_response[0], confidence), min(confidence / 100, 1.0)
+ 
+def is_valid_query(query):
+    """Validate user input to prevent irrelevant queries."""
+    banned_words = ["scam", "hack", "illegal"]
+    if len(query) < 5:
+        return False, "Query is too short. Please provide more details."
+    if any(word in query.lower() for word in banned_words):
+        return False, "This query contains restricted words."
+    return True, ""
+ 
 def main():
-    st.title("Financial Document Search")
-    st.write("Search financial documents using AI-powered retrieval and ranking.")
-    query = st.text_input("Enter your query:")
-    
-    if query:
-        response, confidence = get_rag_response(query)
-        st.subheader("Response")
-        st.write(response)
-        st.write(f"Confidence: {confidence:.2f}")
-
+    st.title("Financial RAG Chatbot")
+    user_query = st.text_input("Enter your financial question:")
+    if st.button("Get Answer"):
+        if user_query:
+            valid, message = is_valid_query(user_query)
+            if not valid:
+                st.error(message)
+            else:
+                response, confidence = get_rag_response(user_query)
+                st.write(f"**Answer:** {response}")
+                st.write(f"**Confidence Score:** {confidence:.2f}")
+        else:
+            st.warning("Please enter a query.")
+ 
 if __name__ == "__main__":
     main()
