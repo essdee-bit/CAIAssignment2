@@ -13,7 +13,7 @@ import threading
 # File paths to financial documents
 pdf_files = ["aapl-20220924.pdf", "aapl-20230930.pdf"]
 
-@st.singleton
+@st.cache_resource
 def load_resources():
     """Load models and prepare embeddings and FAISS index."""
     embedding_model = SentenceTransformer("all-mpnet-base-v2")
@@ -87,22 +87,11 @@ def get_rag_response(query, embedding_model, cross_encoder, text_chunks, bm25, i
     best_response, confidence = ranked_results[0]
     return best_response, confidence / 100
 
-def load_resources_threaded():
-    """Run the load_resources function in a separate thread."""
-    thread = threading.Thread(target=load_resources)
-    thread.start()
-    return thread
-
 def main():
     st.title("Financial Document Search")
     st.write("Search financial documents using AI-powered retrieval and ranking.")
     
     with st.spinner("Loading resources..."):
-        # Load resources in a separate thread
-        thread = load_resources_threaded()
-        thread.join()  # Wait for the thread to finish
-        
-        # Resources are loaded after the thread completes
         embedding_model, cross_encoder, text_chunks, bm25, index = load_resources()
     
     query = st.text_input("Enter your query:")
